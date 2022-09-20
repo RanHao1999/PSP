@@ -37,16 +37,12 @@ Process:
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 from matplotlib import colors
-from matplotlib import gridspec
-from matplotlib.path import Path
-from matplotlib.patches import PathPatch
 import pandas as pd
 import pylab as pl
 from datetime import datetime, timedelta
-import requests
-from bs4 import BeautifulSoup
-import pyspedas
+import scipy
 
 import pfsspy
 import pfsspy.utils
@@ -58,7 +54,7 @@ import sunpy.map
 from sunpy.io.cdf import read_cdf
 from sunpy.net import Fido, attrs as a
 from sunpy.coordinates import frames, get_body_heliographic_stonyhurst
-#from sunkit_pyvista import SunpyPlotter
+from sunkit_pyvista import SunpyPlotter
 
 from astropy.visualization import AsymmetricPercentileInterval, ImageNormalize, LogStretch
 import astropy.constants as const
@@ -67,14 +63,41 @@ from astropy.coordinates import SkyCoord
 import astropy.io.fits as fits
 from astropy.wcs import WCS
 
-from download_data import download_psp, download_gong_adapt
+from download_data import download_psp, download_gong_adapt, download_aia_synoptic, mkd
 
-def read_psp_data(psp_path):
+
+def read_psp_data(psp_path, res_path):
     """
     The function for reading hmi and psp files.
     :date: format: YYYY-MM-DD
     :return: a hmi map and a psp data.
     """
+    def sw_vel_interp(sw_vel):
+        times_all = [datetime.strptime(x, "%Y-%m-%d %H:%M") for x in sw_vel.index]
+        values_all = [x[0] for x in sw_vel.values]
+        times_proper = [times_all[i] for i in range(len(times_all)) if abs(values_all[i]) < 1e10]
+        values_proper = [values_all[i] for i in range(len(values_all)) if abs(values_all[i]) < 1e10]
+        t_del_standard = (times_all[1] - times_all[0]).total_seconds()
+
+        x4interp = [(times_proper[i] - times_all[0]).total_seconds() / t_del_standard for i in range(len(times_proper))]
+        x_all = [(times_all[i] - times_all[0]).total_seconds() / t_del_standard for i in range(len(times_all))]
+
+        # x4interp[0] should = x_all[0], x4interp[-1] should = x_all[-1]
+        if x4interp[0] != x_all[0]:
+            x4interp = [x_all[0]] + x4interp
+            values_proper = [np.average(values_proper[:10])] + values_proper
+        if x4interp[-1] != x_all[-1]:
+            x4interp = x4interp + [x_all[-1]]
+            values_proper = values_proper + [np.average(values_proper[-10:])]
+
+        f_interp = scipy.interpolate.interp1d(x4interp, values_proper)
+        y_all = f_interp(x_all) * (u.km / u.s)
+
+        for i in range(len(sw_vel)):
+            sw_vel.values[i] = y_all[i]
+
+        return sw_vel
+
     # Deal with psp data, return psp location.
     # ======================================================================================
     list_psp = os.listdir(psp_path)
@@ -82,16 +105,43 @@ def read_psp_data(psp_path):
     psp_l3i.sort()
     psp_dataframes_lst = [read_cdf(psp_path + '/' + x)[0].to_dataframe() for x in psp_l3i]
     psp_dataframe = pd.concat(psp_dataframes_lst)
+    psp_dataframe = psp_dataframe[::2000]
 
     # Derive the solar wind velocity
-    sw_vel = np.sqrt(psp_dataframe['vp1_fit_RTN_0'] ** 2 + psp_dataframe['vp1_fit_RTN_1'] ** 2 + psp_dataframe['vp1_fit_RTN_2'] ** 2)[::2000] * (u.km / u.s)
+    psp_spi = [x for x in list_psp if 'psp_swp_spi_sf00_l3_mom' in x]
+    psp_spi.sort()
+    psp_spi_dataframe = pd.concat([read_cdf(psp_path + '/' + x)[0].to_dataframe() for x in psp_spi])
 
-    psp_HCI_x = psp_dataframe['sc_pos_HCI_0'][::2000] * u.km # 1/2000 data selection rate
-    psp_HCI_y = psp_dataframe['sc_pos_HCI_1'][::2000] * u.km
-    psp_HCI_z = psp_dataframe['sc_pos_HCI_2'][::2000] * u.km
 
-    psp_carr_lon = psp_dataframe['carr_longitude'][::2000] * u.deg
-    psp_carr_lat = psp_dataframe['carr_latitude'][::2000] * u.deg
+    # Match the time stamps between spi and spc
+    times = [x.strftime("%Y-%m-%d %H:%M") for x in psp_dataframe.index]
+    sw0 = np.array([np.average(psp_spi_dataframe['VEL_RTN_SUN_0'][x]) for x in times])
+    sw1 = np.array([np.average(psp_spi_dataframe['VEL_RTN_SUN_1'][x]) for x in times])
+    sw2 = np.array([np.average(psp_spi_dataframe['VEL_RTN_SUN_2'][x]) for x in times])
+    values_sw_vel = np.sqrt(sw0 ** 2 + sw1 ** 2 + sw2 ** 2)
+
+    # Plot the solar wind velocity
+    sw_vel_all_component = pd.DataFrame({'sw_r': sw0, 'sw_t': sw1, 'sw_n': sw2, 'SW_vel': values_sw_vel}, index=times) * (u.km / u.s)
+    ax = plt.figure(figsize=(7, 7)).add_subplot(111)
+    sw_vel_all_component.plot(ax=ax)
+    plt.ylabel('unit: km/s')
+    plt.title('Solar Wind Velocity')
+    plt.xticks(rotation=30)
+    plt.savefig(res_path + '/solarwind_velocity.jpg', format='jpg', dpi=400)
+#    plt.show()
+
+    sw_vel = pd.DataFrame({'SW_vel': values_sw_vel}, index=times)
+    sw_vel = sw_vel_interp(sw_vel)
+
+    # Plot the solar wind velocity profiles
+
+
+    psp_HCI_x = psp_dataframe['sc_pos_HCI_0'] * u.km # 1/2000 data selection rate
+    psp_HCI_y = psp_dataframe['sc_pos_HCI_1'] * u.km
+    psp_HCI_z = psp_dataframe['sc_pos_HCI_2'] * u.km
+
+    psp_carr_lon = psp_dataframe['carr_longitude'] * u.deg
+    psp_carr_lat = psp_dataframe['carr_latitude'] * u.deg
     # Position of PSP, HCI and HGS
     psp_HCI_radius = np.sqrt(psp_HCI_x ** 2 + psp_HCI_y ** 2 + psp_HCI_z ** 2)
     psp_HCI_lat = np.radians(np.arcsin(psp_HCI_z / psp_HCI_radius))
@@ -131,7 +181,7 @@ def psp_trajectory_nd():
     plt.show()
     return 0
 
-def Parker_Spiral_extrapolation(SC_coordinates, SC_coordinates_carr, sw_vel, ss_height, t_start, t_end):
+def Parker_Spiral_extrapolation(SC_coordinates, SC_coordinates_carr, sw_vel, ss_height, t_start, t_end, res_path):
     """
     The function to connect the spacecraft to 2.5 R_sun via Parker Spiral extrapolation.
     Parker Spiral Equation:
@@ -162,13 +212,13 @@ def Parker_Spiral_extrapolation(SC_coordinates, SC_coordinates_carr, sw_vel, ss_
 
     SC_coordinates_0501 = []
     SC_coordinates_0501_carr = []
-    SW_vel_0501 = []
+    SW_vel_0501 = sw_vel[t_start.replace('T', ' '):t_end.replace('T', ' ')]
+
     for i in range(len(SC_coordinates)):
-        if SC_coordinates[i].obstime.value < datetime.strptime(dend, '%Y-%m-%d') and \
-                SC_coordinates[i].obstime.value > datetime.strptime(dstart, '%Y-%m-%d'):
+        if SC_coordinates[i].obstime.value < datetime.strptime(t_end, '%Y-%m-%dT%H:%M:%S') and \
+                SC_coordinates[i].obstime.value > datetime.strptime(t_start, '%Y-%m-%dT%H:%M:%S'):
             SC_coordinates_0501.append(SC_coordinates[i])
             SC_coordinates_0501_carr.append(SC_coordinates_carr[i])
-            SW_vel_0501.append(sw_vel[i])
 
     r_0501 = [x.distance.to(u.Rsun) for x in SC_coordinates_0501]
     lat_0501 = [x.lat.to(u.rad) for x in SC_coordinates_0501]
@@ -179,7 +229,7 @@ def Parker_Spiral_extrapolation(SC_coordinates, SC_coordinates_carr, sw_vel, ss_
     Earth1 = get_body_heliographic_stonyhurst('earth', dstart).transform_to(frames.HeliocentricInertial)
     Earth2 = get_body_heliographic_stonyhurst('earth', dend).transform_to(frames.HeliocentricInertial)
 
-    fig, ax = plt.subplots(figsize = (8, 5), subplot_kw = {'projection' : 'polar'})
+    fig, ax = plt.subplots(figsize = (10, 5), subplot_kw = {'projection' : 'polar'})
     ax.plot([x.value for x in lon_psp], [x.value for x in r_psp], color = 'blue', label='PSP trajectory')
     Source_Sur = pl.Circle((0.0, 0.0), ss_height, transform=ax.transData._b, color="yellow", alpha=0.4, label='Source Surface')
     ax.add_artist(Source_Sur)
@@ -188,35 +238,30 @@ def Parker_Spiral_extrapolation(SC_coordinates, SC_coordinates_carr, sw_vel, ss_
     lat_ss = lat_0501
 
     for i in range(len(SC_coordinates_0501)):
+        solarwind_velocity = SW_vel_0501['SW_vel'][i] * u.km / u.s
         N2 = 500
         PS_line = np.linspace(r_ss.value, r_0501[i].value, N2) * (u.Rsun)
         phi_sc = lon_0501[i].to(u.rad)
-        lons = phi_sc + Omega_sun / sw_vel[i] * (r_0501[i] - PS_line)
+        lons = phi_sc + Omega_sun / solarwind_velocity * (r_0501[i] - PS_line)
         lons = lons.to(u.rad)
         lon_ss.append(lons[0])
 
         phi_sc_carr = lon_0501_carr[i].to(u.rad)
-        lons_carr = phi_sc_carr + Omega_sun / sw_vel[i] * (r_0501[i] - PS_line)
+        lons_carr = phi_sc_carr + Omega_sun / solarwind_velocity * (r_0501[i] - PS_line)
         lons_carr = lons_carr.to(u.rad)
         lon_ss_carr.append(lons_carr[0])
         if i == 0:
             ax.plot(lons, PS_line, 'green', label='Parker Spiral')
-            ax.scatter(lons[-1], PS_line[-1], marker='o', color='brown', label=dstart)
+            ax.scatter(lons[-1], PS_line[-1], marker='o', color='brown', label=t_start)
         if i == len(SC_coordinates_0501) - 1:
             ax.plot(lons, PS_line, 'green')
-            ax.scatter(lons[-1], PS_line[-1], marker='o', color='orange', label=dend)
-        if SC_coordinates_0501[i].obstime.value - datetime.strptime('2021-05-01T00:30', '%Y-%m-%dT%H:%M') < timedelta(minutes=10)\
-                and SC_coordinates_0501[i].obstime.value - datetime.strptime('2021-05-01T00:30', '%Y-%m-%dT%H:%M') > timedelta(minutes=0):
-            ax.plot(lons, PS_line, 'green')
-            ax.scatter(lons[-1], PS_line[-1], marker='o', color='olive', label='2021-05-01')
+            ax.scatter(lons[-1], PS_line[-1], marker='o', color='orange', label=t_end)
     ax.plot(Earth1.lon.to(u.rad), 80 * u.Rsun, marker='o', color='cornflowerblue', label='Earth ' + dstart)
     ax.plot(Earth2.lon.to(u.rad), 80 * u.Rsun, marker='o', color='midnightblue', label='Earth ' + dend)
     ax.set_title('Parker Spiral Line, r_unit = R_sun')
     plt.legend(loc=3, bbox_to_anchor=(1.05, 0))
-#    if os.path.exists('res/adapt/'+dstart.replace('-','_')) == False:
-#        os.mkdir('res/adapt/'+dstart.replace('-'))
 #    plt.show()
-    plt.savefig('res/adapt/Parker_Spiral_extrapolation.jpg', format='jpg', dpi=400)
+    plt.savefig(res_path + '/Parker_Spiral_extrapolation.jpg', format='jpg', dpi=400)
 
     coordinates_ss = [SkyCoord(lon_ss[i], lat_ss[i], r_ss.to(u.Rsun),
                                frame=SC_coordinates_0501[i].frame)
@@ -254,7 +299,7 @@ def coordinate_ss_respect_to_Sun(coordinates_ss, carrington_frame):
 
     return coordinates_relative
 
-def pfss_trace(coord_carr, rss, time_gong, index_gong):
+def pfss_trace(coord_carr, rss, time_gong, index_gong, res_path):
     """
     Function for pfss trace from source surface to photosphere
     :param hmi_map: hmi synoptic map
@@ -317,21 +362,18 @@ def pfss_trace(coord_carr, rss, time_gong, index_gong):
     m = pfss_in.map
     ax = plt.subplot(projection=m)
     m.plot(axes=ax)
-    for i in range(len(coord_carr)):
-        c = seeds[i]
-        ax.plot_coord(c, color='orange', marker='o', linewidth=1, markersize=2)
-        if (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) < timedelta(hours=1) \
-                and (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) > timedelta(hours=0):
-            ax.plot_coord(c, color='black', marker='D', linewidth=0, markersize=5, label='2021-05-01')
+    for c in seeds:
+        ax.plot_coord(c, color='orange', marker='o', linewidth=1, markersize=2, label='psp trajectory')
     ax.plot_coord(pfss_out.source_surface_pils[0])
-    plt.legend()
-#    plt.show()
-    plt.savefig('res/adapt/overplot_gong.jpg', format='jpg', dpi=400)
+    plt.legend(['PSP trajectory'])
+    plt.show()
+#    plt.savefig(res_path + '/overplot_gong.jpg', format='jpg', dpi=400)
+#    plt.savefig('res/adapt/overplot_gong.jpg', format='jpg', dpi=400)
 
 
     return field_lines, seeds, coord_carr, pfss_in, pfss_out, mag_map
 
-def Plots(field_lines, seeds_ss, coord_carr, pfss_in, pfss_out, mag_map):
+def Plots(field_lines, seeds_ss, coord_carr, pfss_in, pfss_out, mag_map, bottom_left, top_right, res_path):
     """
     Plot field lines over various of maps.
     :param field_lines: The field lines object returned from pfss extrapolation.
@@ -343,66 +385,104 @@ def Plots(field_lines, seeds_ss, coord_carr, pfss_in, pfss_out, mag_map):
     # Set up the full map grids
     # Number of steps in cos(latitude)
     r = const.R_sun
+    # Spatial resolution of the global tracing result
     nsteps = 45
-    lon_1d = np.linspace(0, 2 * np.pi, nsteps * 2 + 1)
-    lat_1d = np.arcsin(np.linspace(-1, 1, nsteps + 1))
+    lon_1d = np.linspace(0, 2 * np.pi, 360)
+    lat_1d = np.arcsin(np.linspace(-1, 1, 180))
     lon, lat = np.meshgrid(lon_1d, lat_1d, indexing='ij')
     lon, lat = lon * u.rad, lat * u.rad
     seeds = SkyCoord(lon.ravel(), lat.ravel(), r, frame=pfss_out.coordinate_frame)
     tracer = tracing.FortranTracer(max_steps=2000)
+    print('Global Tracing ...')
     field_lines_all = tracer.trace(seeds, pfss_out)
+    print('Finished global tracing')
 
-    fig = plt.figure(figsize=(9, 10))
-    ax = fig.add_subplot(2, 1, 1, projection=m)
-    m.plot()
-    for i in range(len(coord_carr)):
-        c = seeds_ss[i]
+    # Get the coronal hole map
+    cmap = colors.ListedColormap(['tab:red', 'black', 'tab:blue'])
+    norm = colors.BoundaryNorm([-1.5, -0.5, 0.5, 1.5], ncolors=3)
+    pols = field_lines_all.polarities.reshape(360, 180).T
+    CH_map = sunpy.map.Map(pols, m.meta)
+    CH_submap= CH_map.submap(SkyCoord(*bottom_left, frame=CH_map.coordinate_frame),
+                        top_right=SkyCoord(*top_right, frame=CH_map.coordinate_frame))
+
+    # composite
+    m_submap = mag_map.submap(SkyCoord(*bottom_left, frame=mag_map.coordinate_frame),
+                        top_right=SkyCoord(*top_right, frame=mag_map.coordinate_frame))
+    comp_map = sunpy.map.Map(m_submap, CH_submap, composite=True, plot_settings=mag_map.plot_settings)
+    levels = [-1.0, 0, 1.0]
+    comp_map.set_levels(index=1, levels = levels)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1, projection=m)
+    comp_map.plot(axes=ax)
+    for c in seeds_ss:
         ax.plot_coord(c, color='orange', marker='o', linewidth=1, markersize=2)
-        if (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) < timedelta(hours=1) \
-                and (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) > timedelta(hours=0):
-            ax.plot_coord(c, color='black', marker='D', linewidth=0, markersize=5, label='2021-05-01')
-    ax.plot_coord(pfss_out.source_surface_pils[0])
+    ax.plot_coord(pfss_out.source_surface_pils[0], color='black')
     for fline in field_lines[::2]:
         if len(fline.coords) > 0:
             ax.plot_coord(fline.coords, alpha=0.7, linewidth=0.5, color='green')
-    ax.set_title('Input GONG Map')
-    plt.legend()
-
-    ax = fig.add_subplot(2, 1, 2)
-    # Plot HCS
-    cmap = colors.ListedColormap(['tab:red', 'black', 'tab:blue'])
-    norm = colors.BoundaryNorm([-1.5, -0.5, 0.5, 1.5], ncolors=3)
-    pols = field_lines_all.polarities.reshape(2 * nsteps + 1, nsteps + 1).T
-    ax.contourf(np.rad2deg(lon_1d), np.sin(lat_1d), pols, norm=norm, cmap=cmap)
-    lons_carr = [c.lon.value for c in coord_carr] # in deg
-    lats_carr = [c.lat.to(u.rad).value for c in coord_carr] # indeg
-    pils_lons = [c.lon.value for c in pfss_out.source_surface_pils[0]]
-    pils_lats = [c.lat.to(u.rad).value for c in pfss_out.source_surface_pils[0]]
-
-    ax.plot(lons_carr, np.sin(lats_carr), color='orange', linewidth=5)
-
-    for fline in field_lines[::2]:
-        lon_fline = fline.coords.lon.value # in deg
-        lat_fline = fline.coords.lat.to(u.rad).value # in rad
-        ax.plot(lon_fline, np.sin(lat_fline), color='green', linewidth=1)
-        ax.plot(pils_lons, np.sin(pils_lats), color='blue', linewidth=0.6)
-    ax.set_ylabel('sin(Latitude)')
-    ax.set_title('Open (blue/red) closed (black) field')
-    ax.set_aspect(0.5 * 360 / 2)
+    ax.set_title('Composite map of coronal holes and GONG map')
+    plt.savefig(res_path + '/trace_gong_CH.jpg', format='jpg', dpi=400)
 #    plt.show()
-#    if os.path.exists('res/adapt/' + h) == False:
-#        os.mkdir('res/adapt/' + h)
-    plt.savefig('res/adapt/gong_CH_overplot.jpg', format='jpg', dpi=400)
-    # ===============================================================================================================
 
 
+    return 0
+
+def make_aia_syn_plot(aia_path, field_lines, coord_carr, bottom_left, top_right, res_path):
+    """
+    Create a AIA synoptic map and overplot trajectory/field lines over the aia map.
+    """
+
+    # Step 1: Create the synoptic AIA map for CR2243.
+    # ================================================================================================
+    # The original header is not standard, errors happen when one wants to map directly.
+    data = sunpy.map.Map(aia_path).data
+
+    # crete a new header
+    plot_settings = sunpy.map.Map('data/aia/aia_synoptic_20210501.fits').plot_settings
+    shape_out = (360, 720)
+    header_new = sunpy.map.make_fitswcs_header(shape_out,
+                                               SkyCoord(-180.0, 0.0, unit=u.deg,
+                                                        frame=frames.HeliographicCarrington,
+                                                        observer='earth',
+                                                        obstime='2021-05-11 00:00:00'),
+                                               scale=[360 / shape_out[1],
+                                                      180 / shape_out[0]] * u.deg / u.pix,
+                                               instrument='aia193',
+                                               observatory='sdo',
+                                               wavelength=193 * u.AA,  projection_code='CAR')
+
+    out_map = sunpy.map.Map(data, header_new, plot_settings=plot_settings)
+
+    out_submap = out_map.submap(SkyCoord(*bottom_left, frame=out_map.coordinate_frame),
+                        top_right=SkyCoord(*top_right, frame=out_map.coordinate_frame))
+
+    lon = [c.lon for c in coord_carr]
+    lat = [c.lat for c in coord_carr]
+    r = [c.radius.to(u.m) for c in coord_carr]
+    seeds = SkyCoord(lon, lat, r, frame=out_map.coordinate_frame)
+
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1, projection=out_submap)
+    out_submap.plot(axes=ax)
+
+    for c in seeds:
+        ax.plot_coord(c, color='cornflowerblue', marker='o', linewidth=1, markersize=2)
+    for fline in field_lines[::2]:
+        if len(fline.coords) > 0:
+            fline_aia = SkyCoord(fline.coords.lon, fline.coords.lat, fline.coords.radius,
+                                 frame=out_map.coordinate_frame)
+            ax.plot_coord(fline_aia, alpha=0.7, linewidth=0.5, color='green')
+#    plt.show()
+    plt.savefig(res_path + '/overplot_aia.jpg', format='jpg', dpi=400)
     """
     # Create a plotter
     # ===============================================================================================================
     plotter = SunpyPlotter()
 
     # Plot a map
-    plotter.plot_map(gong_map, clip_interval=[1, 99] * u.percent)
+    plotter.plot_map(out_map, clip_interval=[1, 99] * u.percent)
     # Add an arrow to show the solar rotation axis
     plotter.plot_solar_axis()
 
@@ -415,92 +495,7 @@ def Plots(field_lines, seeds_ss, coord_carr, pfss_in, pfss_out, mag_map):
     plotter.plot_field_lines(field_lines, color_func=my_fline_color_func)
     plotter.plotter.add_mesh(pv.Sphere(radius=1))
     plotter.show()
-    # ===============================================================================================================
     """
-
-    return 0
-
-def make_aia_syn_plot(field_lines, seeds_gong, coord_carr, pfss_in, pfss_out, mag_map):
-    """
-    Create a AIA synoptic map and overplot trajectory/field lines over the aia map.
-    """
-
-    # Step 1: Create the synoptic AIA map for CR2243.
-    # ================================================================================================
-    aia_raw = fits.open('data/aia/AIA_synoptic_CR2243.fits')
-
-    # The original header is not standard, errors happen when one wants to map directly.
-    header = aia_raw[0].header
-    data = aia_raw[0].data
-    header['rsun_ref'] = sunpy.sun.constants.radius.to_value(u.m)
-
-    # crete a new header
-    shape_out = (1080, 3600)
-    header_new = sunpy.map.make_fitswcs_header(shape_out,
-                                               SkyCoord(-180.0, 0, unit=u.deg,
-                                                        frame=frames.HeliographicCarrington,
-                                                        obstime='2021-05-01 00:00:00'),
-                                               scale=[360 / shape_out[1],
-                                                      180 / shape_out[0]] * u.deg / u.pix,
-                                               wavelength=193 * u.AA,  projection_code='CAR')
-    out_wcs = WCS(header_new)
-    out_map = sunpy.map.Map(data, header_new)
-
-    plot_settings = sunpy.map.Map('data/aia/aia_synoptic_20210501.fits').plot_settings
-    out_map.plot_settings = plot_settings
-
-    lon = [c.lon for c in coord_carr]
-    lat = [c.lat for c in coord_carr]
-    r = [c.radius.to(u.m) for c in coord_carr]
-    seeds = SkyCoord(lon, lat, r, frame=out_map.coordinate_frame)
-
-
-    fig = plt.figure(figsize=(9, 4))
-    ax = fig.add_subplot(2, 1, 1, projection=out_map)
-    out_map.plot(axes=ax)
-    lon, lat = ax.coords
-    lon.set_coord_type('longitude')
-    lon.coord_wrap = 180
-    lon.set_format_unit(u.deg)
-    lat.set_coord_type('latitude')
-    lat.set_format_unit(u.deg)
-
-    lon.set_axislabel('Carrington Longitude', minpad=0.8)
-    lat.set_axislabel('Carrington Latitude', minpad=0.9)
-    lon.set_ticks(spacing=90*u.deg, color='k')
-    lat.set_ticks(spacing=30*u.deg, color='k')
-
-    lon.set_ticks_visible(True)
-
-    for i in range(len(coord_carr)):
-        c = seeds[i]
-        ax.plot_coord(c, color='orange', marker='o', linewidth=1, markersize=2)
-        if (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) < timedelta(hours=1) \
-                and (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) > timedelta(
-            hours=0):
-            ax.plot_coord(c, color='black', marker='D', linewidth=0, markersize=5, label='2021-05-01')
-    ax.plot_coord(pfss_out.source_surface_pils[0])
-    for fline in field_lines[::2]:
-        if len(fline.coords) > 0:
-            fline_aia = SkyCoord(fline.coords.lon, fline.coords.lat, fline.coords.radius,
-                                 frame=out_map.coordinate_frame)
-            ax.plot_coord(fline_aia, alpha=0.7, linewidth=0.5, color='green')
-
-    m = pfss_in.map
-    ax = fig.add_subplot(2, 1, 2, projection=m)
-    mag_map.plot(axes=ax)
-    for i in range(len(coord_carr)):
-        c = seeds_gong[i]
-        ax.plot_coord(c, color='orange', marker='o', linewidth=1, markersize=2)
-        if (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) < timedelta(hours=1) \
-                and (coord_carr[i].obstime.value - datetime.strptime('2021-05-01T00', '%Y-%m-%dT%H')) > timedelta(hours=0):
-            ax.plot_coord(c, color='black', marker='D', linewidth=0, markersize=5, label='2021-05-01')
-    ax.plot_coord(pfss_out.source_surface_pils[0])
-    for fline in field_lines[::2]:
-        if len(fline.coords) > 0:
-            ax.plot_coord(fline.coords, alpha=0.7, linewidth=0.5, color='green')
-#    plt.show()
-    plt.savefig('res/adapt/overplot_aia.jpg', format='jpg', dpi=400)
 
     # ================================================================================================
     return 0
@@ -516,8 +511,12 @@ def main():
     t_end = input('Please enter the end time of your psp trajectory: (Format: YYYY-mm-ddTHH:MM:SS)')
     download_psp(t_start, t_end)
 
+    res_path = 'res/'+t_start.split('T')[0].replace('-', '_')
+    if os.path.exists(res_path) == False:
+        mkd(res_path)
+
     # Read PSP data
-    SC_coordinates, SC_coordinates_carr, sw_vel = read_psp_data('data/psp')
+    SC_coordinates, SC_coordinates_carr, sw_vel = read_psp_data('data/psp/'+t_start.split('T')[0].replace('-', '_'), res_path)
 
     time_gong = input('Please enter the time of the GONG ADAPT data you want to download: (Format: YYYY-mm-ddTHH:00:00, HH is even number)')
     index_gong = int(input("Please enter the index of the gong adapt map: (0 ~ 11)"))
@@ -525,12 +524,24 @@ def main():
 
     rss = float(input('Please enter the height of Source Surface (unit: R_sun, usually 1.5 ~ 3.0):'))
 # Step2: Parker Spiral extrapolation, spacecraft position --> Source Surface       # m/s
-    ss_coordinates, ss_coordinates_carr = Parker_Spiral_extrapolation(SC_coordinates,SC_coordinates_carr, sw_vel, rss, t_start, t_end)
+    ss_coordinates, ss_coordinates_carr = Parker_Spiral_extrapolation(SC_coordinates,SC_coordinates_carr, sw_vel, rss, t_start, t_end, res_path)
 
 # Step3: pfss extrapolation, Source Surface --> Solar Surface
-    field_lines, seeds, coord_carr, pfss_in, pfss_out, mag_map = pfss_trace(ss_coordinates_carr, rss, time_gong, index_gong)
-    Plots(field_lines, seeds, coord_carr, pfss_in, pfss_out, mag_map)
-#    make_aia_syn_plot(field_lines, seeds, coord_carr, pfss_in, pfss_out, mag_map)
+
+    field_lines, seeds, coord_carr, pfss_in, pfss_out, mag_map = pfss_trace(ss_coordinates_carr, rss, time_gong, index_gong, res_path)
+
+    bottom_left = input('Please input the coordinate of the bottom left corner of your needed part: (e.g. 10,20) \n |'
+                        '(Attention: 360 is recognized as 0 in carrington coordinates, if you want to input 360, try 359 please.)')
+    top_right = input('Please input the coordinate of the top right corner of your needed part: (e.g. 10,20)')
+    bottom_left = [float(ele) for ele in bottom_left.split(',')] * u.deg
+    top_right = [float(ele) for ele in top_right.split(',')] * u.deg
+
+    Plots(field_lines, seeds, coord_carr, pfss_in, pfss_out, mag_map, bottom_left, top_right, res_path)
+
+    CR_num = int(input('Please input the Carrington Rotation number of your AIA synoptic map: (e.g., 2243)'))
+    aia_filename = download_aia_synoptic(CR_number=CR_num)
+
+    make_aia_syn_plot('data/aia/'+aia_filename, field_lines, coord_carr, bottom_left, top_right, res_path)
 
     return 0
 

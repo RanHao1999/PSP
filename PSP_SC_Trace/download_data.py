@@ -14,42 +14,53 @@ import requests
 from bs4 import BeautifulSoup
 import gzip
 
+def mkd(path):
+    folders = path.split('/')
+    for i in range(1, len(folders)):
+        if os.path.exists('/'.join(folders[0:i+1])) == False:
+            os.mkdir('/'.join(folders[0:i+1]))
 
-def is_downloadable(url):
-    """
-    Does the url contain a downloadable resource.
-    """
-    h = requests.head(url, allow_redirects=True)
-    header = h.headers
-    content_type = header.get('content-type')
-    if 'text' in content_type.lower():
-        print('Data not downloadable')
-        return False
-    if 'html' in content_type.lower():
-        print('Data not downloadable')
-        return False
-    return True
 
 def download_file(url, target_folder):
     """
     download the url file to the target folder
     """
-    if is_downloadable(url) == True:
-        local_filename = target_folder + '/' + url.split('/')[-1]
-        if os.path.exists(local_filename) == True:
-            print('data already exists')
-            return 0
-        # Note: the stream = True parameter below
-        else:
+
+    def is_downloadable(url):
+        """
+        Does the url contain a downloadable resource.
+        """
+        h = requests.head(url, allow_redirects=True)
+        header = h.headers
+        content_type = header.get('content-type')
+        if 'text' in content_type.lower():
+            print('Data not downloadable')
+            return False
+        if 'html' in content_type.lower():
+            print('Data not downloadable')
+            return False
+        return True
+
+    if os.path.exists(target_folder) == False:
+        mkd(target_folder)
+
+    local_filename = target_folder + '/' + url.split('/')[-1]
+    # make folder
+
+    if os.path.exists(local_filename) == True:
+        print('data already exists')
+        return 0
+    else:
+        if is_downloadable(url) == True:
             with requests.get(url, stream=True) as r:
                 r.raise_for_status()
                 with open(local_filename, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
             return local_filename
-    else:
-        print('There is no downloadable file linked to your url.')
-        return 0
+        else:
+            print('There is no downloadable file linked to your url.')
+            return 0
 
 def un_gz(file_path):
     """
@@ -72,8 +83,6 @@ def download_gong_adapt(time):
     """
     # download the gong adapt data
     target_folder = 'data/gong/adapt/' + time.split('T')[0].replace('-', '_') + '/' + time.split('T')[1].replace(':', '')
-    if os.path.exists(target_folder) == False:
-        os.mkdir(target_folder)
     date = time.split('T')[0]
     t_tag = time.split('T')[1]
     year, month, date = date.split('-')[0], date.split('-')[1], \
@@ -83,7 +92,7 @@ def download_gong_adapt(time):
     time_tag = year + month + date + hour + minute
 
     url = 'https://gong.nso.edu/adapt/maps/gong/'+year
-    r =requests.get(url, allow_redirects=True)
+    r = requests.get(url, allow_redirects=True)
     soup = BeautifulSoup(r.text, 'html.parser')
     file_names = [node.get('href') for node in soup.find_all('a')
                   if node.get('href').endswith('fts.gz') and time_tag in node.get('href')]
@@ -105,7 +114,7 @@ def download_psp(t_start, t_end):
     def dates_between(t_start, t_end):
         date_list = []
         date_start = datetime.datetime.strptime(t_start, '%Y-%m-%dT%H:%M:%S')
-        date_end = datetime.datetime.strptime(t_end, '%Y-%m-%dT%H:%M:%S')
+        date_end = datetime.datetime.strptime(t_end, '%Y-%m-%dT%H:%M:%S') + datetime.timedelta(days=1)
 
         while date_start <= date_end:
             date_str = date_start.strftime('%Y-%m-%d')
@@ -115,16 +124,30 @@ def download_psp(t_start, t_end):
 
     target_folder = 'data/psp/' + t_start.split('T')[0].replace('-', '_')
 
-    if os.path.exists(target_folder) == False:
-        os.mkdir(target_folder)
-
     date_list = dates_between(t_start, t_end)
 
     for date in date_list:
         year, month, day = date.split('-')[0], date.split('-')[1], \
                             date.split('-')[2]
-        url = 'https://spdf.gsfc.nasa.gov/pub/data/psp/sweap/spc/l3/l3i/' + year
-        name = 'psp_swp_spc_l3i_' + date.replace('-', '') + '_v02.cdf'
+        url1 = 'https://spdf.gsfc.nasa.gov/pub/data/psp/sweap/spi/l3/spi_sf00_l3_mom/' + year
+        url2 = 'https://spdf.gsfc.nasa.gov/pub/data/psp/sweap/spc/l3/l3i/' + year
+        name1 = 'psp_swp_spi_sf00_l3_mom_' + date.replace('-', '') + '_v04.cdf'
+        name2 = 'psp_swp_spc_l3i_' + date.replace('-', '') + '_v02.cdf'
 
-        download_file(url + '/' + name, target_folder)
+        download_file(url1 + '/' + name1, target_folder)
+        download_file(url2 + '/' + name2, target_folder)
     return 0
+
+def download_aia_synoptic(CR_number):
+    """
+    Download AIA synoptic map from: https://sun.njit.edu/#/coronal_holes (IDSEAR web)
+    :param CR_number: The carrington number of the AIA synoptic map
+    :return: data in the folder
+    """
+
+    target_folder = 'data/aia'
+
+    url = 'https://sun.njit.edu/coronal_holes/data/aia193_synmap_cr' + str(CR_number) + '.fits'
+    download_file(url, target_folder)
+
+    return 'aia193_synmap_cr' + str(CR_number) + '.fits'
