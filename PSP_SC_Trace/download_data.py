@@ -1,5 +1,5 @@
 """
-@auther = RanHao
+@authr = RanHao
 
 Aim:
 This python script is for downloading data that is needed for analysis.
