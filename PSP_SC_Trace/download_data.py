@@ -1,5 +1,5 @@
 """
-@author = RanHao
+@auther = RanHao
 
 Aim:
 This python script is for downloading data that is needed for analysis.
@@ -16,7 +16,7 @@ import gzip
 
 def mkd(path):
     folders = path.split('/')
-    for i in range(1, len(folders)):
+    for i in range(len(folders)):
         if os.path.exists('/'.join(folders[0:i+1])) == False:
             os.mkdir('/'.join(folders[0:i+1]))
 
@@ -136,6 +136,7 @@ def download_psp(t_start, t_end):
 
         download_file(url1 + '/' + name1, target_folder)
         download_file(url2 + '/' + name2, target_folder)
+    print('data downloading finished')
     return 0
 
 def download_aia_synoptic(CR_number):
