@@ -35,6 +35,6 @@ If error happens because of the loss of some packages, please "pip install xx" t
 
 If the server reufuses the request for retrieving data (such as Max retrieve exceeded etc.), please download data maually to the corresponding folder. The code will work.
 
-This code has helped with the magnetic connectivity part in arXiv:2301.05829.
+This code has done the magnetic connectivity part in arXiv:2301.05829.
 
 Enjoy!
