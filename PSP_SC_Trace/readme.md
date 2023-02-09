@@ -1,16 +1,16 @@
 The codes in this folder mainly focus at tracing the psp trajectory back to the surface of the Sun.
 Folder Structure:
->main  
-      >SC2SolarSurface.py  
-      >download_data.py
-      >data
-            >psp
-                  >sweap
-            >gong
-                  >adapt
-            >aia
-      <res
-           <source_region
+-main  
+      -SC2SolarSurface.py  
+      -download_data.py
+      -data
+            -psp
+                  -sweap
+            -gong
+                  -adapt
+            -aia
+      -res
+           -source_region
  
 After creating a proper folder, the user can use the code via "python3 SC2SolarSurface.py".
 The codes adopt Parker Spiral to trace back to the source surface(the height of which needs be defined by the user), 
