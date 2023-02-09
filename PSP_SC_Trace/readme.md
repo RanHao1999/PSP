@@ -1,8 +1,8 @@
 The codes in this folder mainly focus at tracing the psp trajectory back to the surface of the Sun.
 Folder Structure:
--main  
-      -SC2SolarSurface.py  
-      -download_data.py
+main  
+- SC2SolarSurface.py  
+- download_data.py
       -data
             -psp
                   -sweap
