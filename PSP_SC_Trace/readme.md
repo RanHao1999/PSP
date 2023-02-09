@@ -5,7 +5,7 @@ Folder Structure:
   - download_data.py
   - data
     - psp
-    - sweap
+      - sweap
   - gong
     - adapt
   - aia
@@ -34,5 +34,7 @@ The height of the source surface:
 If error happens because of the loss of some packages, please "pip install xx" them.
 
 If the server reufuses the request for retrieving data (such as Max retrieve exceeded etc.), please download data maually to the corresponding folder. The code will work.
+
+This code has helped with the magnetic connectivity part in arXiv:2301.05829.
 
 Enjoy!
