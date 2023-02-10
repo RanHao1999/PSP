@@ -1,6 +1,6 @@
 """
 @author = RanHao
-This code is for trace the source region of a specific solar wind observed by PSP.
+This code is for tracing the source region of solar wind observed by PSP.
 
 Parameters to be set:  PFSS parameters: |R_ss (Height of the Source Surface)
                                         |nrho
