@@ -1,2 +1,4 @@
 # PSP
-Codes for PSP data analysis.
+Codes for Parker Solar Probe(PSP) data analysis.
+
+Discussions are welcomed!
