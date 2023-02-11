@@ -74,7 +74,9 @@ import concurrent.futures
 from download_data import download_psp, download_gong_adapt, download_aia_synoptic, mkd
 os.chdir(sys.path[0])
 
+# This parameter is adjustible. It shifts the output aia-backgroud map, making its center longitude to the parameter.
 reproject_central_lon = 180.0
+
 def reproject_map(map, central_lon, shape_out):
     """
     central_lon: float, not quantity
