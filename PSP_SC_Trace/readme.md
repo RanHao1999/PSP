@@ -6,9 +6,9 @@ Folder Structure:
   - data
     - psp
       - sweap
-  - gong
-    - adapt
-  - aia
+    - gong
+      - adapt
+    - aia
   - res
     - source_region
  
