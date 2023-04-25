@@ -1,10 +1,11 @@
 """
-@auther = RanHao
+@author = RanHao
 
 Aim:
 This python script is for downloading data that is needed for analysis.
 This script is supposed to be put in the main folder.
-This script is written for provide downloading functions for SC2SolarSurface.py, it has no main function.
+This script is written for providing downloading functions for SC2SolarSurface.py.
+This script has no main function.
 
 """
 import datetime
