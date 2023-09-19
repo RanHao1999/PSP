@@ -17,7 +17,7 @@ The codes adopt Parker Spiral to trace back to the source surface(the height of 
 then pfss extrapolation from source surface to the surface of the Sun.
 
 The user needs to input the start/end time of PSP, and the time of gong-adapt, the index of the gong-adapt map sequence(0~11), 
-the height of the source surface to run the code. (Just run the code! And input the information when the code asks you to!)
+the height of the source surface to run the code. (All the parameters are set in the main() function.)
 
 The data files of the example are not uploaded. However, there is a data downloading section in the code, try to run the code and download the data on your own! 
 
