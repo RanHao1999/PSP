@@ -33,7 +33,6 @@ Process:
     Output:
         Maps with coordinates of the SC on the source surface and the field lines connecting the SC to the photosphere.
     Last update: 2022.11.15
-    "It's valentines day (2023.02.14), I want to confess love to my girlfriend zsy! Love you 3000~"
 """
 
 # import packages
