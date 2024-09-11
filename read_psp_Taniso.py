@@ -4,6 +4,11 @@
 This file is for reading Parker Solar Probe data at a large scale (e.g., over a timespan of over 10 days).
 
 This code reads critical parameters (B, V, T, etc) from the .cdf files, and save them in an .h5 file for future easy extraction.
+
+Please go to the main function to modify the parameters.
+
+Good luck! Discussions are welcomed!
+
 """
 
 
@@ -409,19 +414,20 @@ def read_fov(path_spi, target_tstart, target_tend, target_dt):
 
 def main():
     # Read PSP data.
-    path_fld = 'data/psp/FIELDS'
-    path_swp = 'data/psp/SWEAP'
-    target_tstart = pd.Timestamp("2021-11-15 00:10:00")
-    target_tend = pd.Timestamp("2021-11-24 23:50:00")
-    target_dt = 2
+    path_fld = 'data/psp/FIELDS' # Set the FIELDS data folder
+    path_swp = 'data/psp/SWEAP' # Set the SWEAP data folder
+    target_tstart = pd.Timestamp("2021-11-15 00:10:00") # The starting time of the interval you want to extract.
+    target_tend = pd.Timestamp("2021-11-24 23:50:00") # The end time of the interval you want to extract.
+    target_dt = 2 # Temperal resolution of the returned data, unit in s. Linear extrapolation.
 
     print("Reading Process is on...")
     read_psp(path_fld, path_swp, target_tstart, target_tend, target_dt)
     print("Reading Process is done!")
 
-    #print("Reading fov process in on...")
-    #read_fov(path_swp + '/spi', target_tstart, target_tend, target_dt)
-    #print("Reading fov process is done!")
+    # fov: field of view.
+    print("Reading fov process in on...")
+    read_fov(path_swp + '/spi', target_tstart, target_tend, target_dt) 
+    print("Reading fov process is done!")
 
     return 0
 
